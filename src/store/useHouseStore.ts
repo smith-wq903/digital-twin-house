@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { temporal } from 'zundo';
 import type { HouseStore, Room, Furniture, MeasurePoint, Opening } from '../types';
 
 /** 家具に rotation / elevation がない旧データに対してデフォルトを補完 */
@@ -12,6 +13,7 @@ function normalizeFurniture(f: Partial<Furniture> & Pick<Furniture, 'id'>): Furn
 }
 
 export const useHouseStore = create<HouseStore>()(
+  temporal(
   persist(
   (set) => ({
   rooms: [],
@@ -141,5 +143,15 @@ export const useHouseStore = create<HouseStore>()(
       furniture: state.furniture,
       openings: state.openings,
     }),
+  }
+  ),
+  {
+    // Undo/Redo の対象：間取りデータのみ（UI選択状態などは除外）
+    partialize: (state) => ({
+      rooms: state.rooms,
+      furniture: state.furniture,
+      openings: state.openings,
+    }),
+    limit: 100, // 最大100ステップ
   }
 ));

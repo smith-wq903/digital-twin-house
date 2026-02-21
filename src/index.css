@@ -53,6 +53,31 @@ html, body, #root {
   color: var(--text-muted);
 }
 
+.undo-redo-btns {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.undo-btn {
+  padding: 5px 12px;
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+.undo-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.undo-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .app-body {
   display: flex;
   flex: 1;
