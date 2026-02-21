@@ -71,6 +71,9 @@ function FurnitureMesh({
     if (orbitRef.current) orbitRef.current.enabled = false;
     gl.domElement.style.cursor = 'grabbing';
 
+    // ドラッグ中は途中位置をUndoスタックに積まない
+    useHouseStore.temporal.getState().pause();
+
     const raycaster = new THREE.Raycaster();
     const onMove = (ev: PointerEvent) => {
       if (!isDragging.current) return;
@@ -88,6 +91,8 @@ function FurnitureMesh({
       gl.domElement.style.cursor = 'auto';
       gl.domElement.removeEventListener('pointermove', onMove);
       gl.domElement.removeEventListener('pointerup', onUp);
+      // ドラッグ終了時点の位置を1ステップとして記録
+      useHouseStore.temporal.getState().resume();
     };
     gl.domElement.addEventListener('pointermove', onMove);
     gl.domElement.addEventListener('pointerup', onUp);
@@ -385,6 +390,8 @@ function MeasurePanel() {
 // ---- キーボード ----
 function KeyboardController() {
   const { furniture, selectedFurnitureId, updateFurniturePosition, updateFurniture, selectFurniture } = useHouseStore();
+  // 矢印キー長押し中のUndo停止タイマー
+  const arrowResumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -394,7 +401,7 @@ function KeyboardController() {
       const item = furniture.find((f) => f.id === selectedFurnitureId);
       if (!item) return;
 
-      // 矢印キー：XZ移動
+      // 矢印キー：XZ移動（連続押し中はUndo記録を一時停止）
       const step = 0.2;
       const [x, y, z] = item.position;
       const posMap: Record<string, [number, number, number]> = {
@@ -405,6 +412,12 @@ function KeyboardController() {
       };
       if (posMap[e.key]) {
         e.preventDefault();
+        // 連続押し中はUndo記録を一時停止し、400ms操作が止まったら再開
+        useHouseStore.temporal.getState().pause();
+        if (arrowResumeTimer.current) clearTimeout(arrowResumeTimer.current);
+        arrowResumeTimer.current = setTimeout(() => {
+          useHouseStore.temporal.getState().resume();
+        }, 400);
         updateFurniturePosition(selectedFurnitureId, posMap[e.key]);
         return;
       }
@@ -419,7 +432,10 @@ function KeyboardController() {
       if (e.key === 'Escape') selectFurniture(null);
     };
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      if (arrowResumeTimer.current) clearTimeout(arrowResumeTimer.current);
+    };
   }, [furniture, selectedFurnitureId, updateFurniturePosition, updateFurniture, selectFurniture]);
 
   return null;
