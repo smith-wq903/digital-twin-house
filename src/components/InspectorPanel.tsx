@@ -126,7 +126,8 @@ function OpeningInspector() {
   if (!opening) return null;
 
   const widthMM = Math.round(opening.widthPx * PX_TO_MM);
-  const kindLabel = opening.kind === 'door' ? 'ドア' : '窓';
+  const depthMM = Math.round((opening.depthPx ?? opening.widthPx) * PX_TO_MM);
+  const kindLabel = opening.kind === 'door' ? 'ドア' : opening.kind === 'window' ? '窓' : '柱';
 
   return (
     <>
@@ -139,13 +140,13 @@ function OpeningInspector() {
         <div className="insp-row">
           <span className="insp-label">種類</span>
           <div className="insp-kind-toggle">
-            {(['door', 'window'] as OpeningKind[]).map((k) => (
+            {(['door', 'window', 'column'] as OpeningKind[]).map((k) => (
               <button
                 key={k}
                 className={`insp-kind-btn ${opening.kind === k ? 'active' : ''}`}
                 onClick={() => updateOpening(opening.id, { kind: k })}
               >
-                {k === 'door' ? 'ドア' : '窓'}
+                {k === 'door' ? 'ドア' : k === 'window' ? '窓' : '柱'}
               </button>
             ))}
           </div>
@@ -167,6 +168,25 @@ function OpeningInspector() {
             <span className="insp-unit">mm</span>
           </div>
         </div>
+
+        {/* 奥行（柱のみ）*/}
+        {opening.kind === 'column' && (
+          <div className="insp-row">
+            <span className="insp-label">奥行</span>
+            <div className="insp-num-row">
+              <input
+                type="number" className="insp-num" step="10" min="100"
+                style={{ width: 70 }}
+                value={depthMM}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (!isNaN(v) && v > 0) updateOpening(opening.id, { depthPx: Math.round(v / PX_TO_MM) });
+                }}
+              />
+              <span className="insp-unit">mm</span>
+            </div>
+          </div>
+        )}
 
         {/* 高さ */}
         <div className="insp-row">

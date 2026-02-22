@@ -17,6 +17,7 @@ const WALL_SNAP = 14; // px snap distance for opening placement
 /** デフォルト開口幅 (px) */
 const DEFAULT_DOOR_W = 20;  // 1.0m
 const DEFAULT_WIN_W  = 28;  // 1.4m
+const DEFAULT_COL_W  = 10;  // 0.5m
 
 type EditorMode = 'draw' | 'edit' | 'opening';
 
@@ -24,6 +25,21 @@ interface WallHit {
   canvasX: number;
   canvasY: number;
   wallAxis: 'h' | 'v';
+}
+
+/** ビュー変換: scale・panX・panY (キャンバスpx基準) */
+interface ViewState {
+  scale: number;
+  panX: number;
+  panY: number;
+}
+
+/** CSS px → キャンバス world px */
+function cssPxToWorld(cssPx: { x: number; y: number }, view: ViewState) {
+  return {
+    x: (cssPx.x - view.panX) / view.scale,
+    y: (cssPx.y - view.panY) / view.scale,
+  };
 }
 
 /** 最も近い壁上のスナップ点を返す */
@@ -63,13 +79,25 @@ interface MoveDrag {
 interface ResizeDrag {
   kind: 'resize';
   roomId: string;
-  /** which corner: 'tl'|'tr'|'bl'|'br' */
   corner: 'tl' | 'tr' | 'bl' | 'br';
-  /** original room snapshot */
   orig: Room;
   startX: number; startY: number;
 }
-type DragState = DrawDrag | MoveDrag | ResizeDrag | null;
+interface MoveOpeningDrag {
+  kind: 'move-opening';
+  openingId: string;
+  /** drag start world coord */
+  startWX: number; startWY: number;
+  /** original opening position */
+  origCX: number; origCY: number;
+}
+/** Middle-mouse pan drag */
+interface PanDrag {
+  kind: 'pan';
+  startPanX: number; startPanY: number;
+  startMouseX: number; startMouseY: number;
+}
+type DragState = DrawDrag | MoveDrag | ResizeDrag | MoveOpeningDrag | PanDrag | null;
 
 function corners(r: Room) {
   return {
@@ -93,6 +121,7 @@ export default function FloorPlanEditor() {
   const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
   const [openingKind, setOpeningKind] = useState<OpeningKind>('door');
   const [hoverWall, setHoverWall] = useState<WallHit | null>(null);
+  const [view, setView] = useState<ViewState>({ scale: 1, panX: 0, panY: 0 });
 
   const {
     rooms, addRoom, updateRoom, removeRoom,
@@ -103,10 +132,12 @@ export default function FloorPlanEditor() {
 
   const bgImageRef = useRef<HTMLImageElement | null>(null);
   const colorIndex = useRef(0);
-  const dragRef = useRef<DragState>(null); // mutable ref for event handlers
+  const dragRef = useRef<DragState>(null);
+  const viewRef = useRef<ViewState>(view);
 
-  // sync ref
+  // keep refs in sync
   useEffect(() => { dragRef.current = dragState; }, [dragState]);
+  useEffect(() => { viewRef.current = view; }, [view]);
 
   // load background image
   useEffect(() => {
@@ -121,11 +152,17 @@ export default function FloorPlanEditor() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
+    const v = viewRef.current;
+
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
-    // bg
+    // bg (always screen space)
     ctx.fillStyle = '#1a1a2e';
     ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+    // apply view transform
+    ctx.save();
+    ctx.setTransform(v.scale, 0, 0, v.scale, v.panX, v.panY);
 
     if (bgImageRef.current) {
       ctx.globalAlpha = 0.4;
@@ -134,13 +171,18 @@ export default function FloorPlanEditor() {
     }
 
     // grid
+    const gridStep = PX_PER_M;
+    const startX = Math.floor(-v.panX / v.scale / gridStep) * gridStep;
+    const startY = Math.floor(-v.panY / v.scale / gridStep) * gridStep;
+    const endX = startX + CANVAS_W / v.scale + gridStep;
+    const endY = startY + CANVAS_H / v.scale + gridStep;
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 1;
-    for (let x = 0; x <= CANVAS_W; x += PX_PER_M) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke();
+    ctx.lineWidth = 1 / v.scale;
+    for (let x = startX; x <= endX; x += gridStep) {
+      ctx.beginPath(); ctx.moveTo(x, startY); ctx.lineTo(x, endY); ctx.stroke();
     }
-    for (let y = 0; y <= CANVAS_H; y += PX_PER_M) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_W, y); ctx.stroke();
+    for (let y = startY; y <= endY; y += gridStep) {
+      ctx.beginPath(); ctx.moveTo(startX, y); ctx.lineTo(endX, y); ctx.stroke();
     }
 
     // rooms
@@ -149,25 +191,23 @@ export default function FloorPlanEditor() {
       ctx.fillStyle = room.color + '55';
       ctx.fillRect(room.x, room.y, room.width, room.height);
       ctx.strokeStyle = isSelected ? '#ffffff' : room.color;
-      ctx.lineWidth = isSelected ? 2 : 2;
-      if (isSelected) ctx.setLineDash([5, 3]);
+      ctx.lineWidth = (isSelected ? 2 : 2) / v.scale;
+      if (isSelected) ctx.setLineDash([5 / v.scale, 3 / v.scale]);
       ctx.strokeRect(room.x, room.y, room.width, room.height);
       ctx.setLineDash([]);
 
-      // label
       ctx.fillStyle = '#fff';
-      ctx.font = '11px sans-serif';
+      ctx.font = `${11 / v.scale}px sans-serif`;
       ctx.textAlign = 'center';
-      ctx.fillText(room.name, room.x + room.width / 2, room.y + room.height / 2 + 4);
+      ctx.fillText(room.name, room.x + room.width / 2, room.y + room.height / 2 + 4 / v.scale);
 
-      // handles in edit mode
       if (isSelected && mode === 'edit') {
         ctx.fillStyle = '#ffffff';
         ctx.strokeStyle = room.color;
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 1.5 / v.scale;
         for (const c of Object.values(corners(room))) {
           ctx.beginPath();
-          ctx.arc(c.x, c.y, HANDLE_R - 2, 0, Math.PI * 2);
+          ctx.arc(c.x, c.y, (HANDLE_R - 2) / v.scale, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
         }
@@ -183,60 +223,96 @@ export default function FloorPlanEditor() {
       ctx.fillStyle = 'rgba(255,255,255,0.12)';
       ctx.fillRect(x, y, w, h);
       ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1.5 / v.scale;
+      ctx.setLineDash([4 / v.scale, 4 / v.scale]);
       ctx.strokeRect(x, y, w, h);
       ctx.setLineDash([]);
     }
 
-    // openings（窓・ドア）
+    // openings（窓・ドア・柱）
     for (const op of openings) {
       const isSelOp = op.id === selectedOpeningId;
       const hw = op.widthPx / 2;
-      const isDoor = op.kind === 'door';
       ctx.save();
-      ctx.strokeStyle = isSelOp ? '#ffffff' : isDoor ? '#d4904a' : '#44ccff';
-      ctx.lineWidth = isSelOp ? 4 : 3;
       ctx.lineCap = 'round';
-      ctx.beginPath();
-      if (op.wallAxis === 'h') {
-        ctx.moveTo(op.canvasX - hw, op.canvasY);
-        ctx.lineTo(op.canvasX + hw, op.canvasY);
+
+      if (op.kind === 'column') {
+        // 柱: 塗り潰しグレー矩形
+        const dh = (op.depthPx ?? op.widthPx) / 2;
+        ctx.fillStyle = isSelOp ? '#ffffff' : '#999999';
+        ctx.strokeStyle = isSelOp ? '#ffee00' : '#cccccc';
+        ctx.lineWidth = (isSelOp ? 2 : 1) / v.scale;
+        if (op.wallAxis === 'h') {
+          ctx.fillRect(op.canvasX - hw, op.canvasY - dh, op.widthPx, op.depthPx ?? op.widthPx);
+          ctx.strokeRect(op.canvasX - hw, op.canvasY - dh, op.widthPx, op.depthPx ?? op.widthPx);
+        } else {
+          ctx.fillRect(op.canvasX - dh, op.canvasY - hw, op.depthPx ?? op.widthPx, op.widthPx);
+          ctx.strokeRect(op.canvasX - dh, op.canvasY - hw, op.depthPx ?? op.widthPx, op.widthPx);
+        }
+        ctx.fillStyle = '#333';
+        ctx.font = `bold ${8 / v.scale}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('C', op.canvasX, op.canvasY + 3 / v.scale);
       } else {
-        ctx.moveTo(op.canvasX, op.canvasY - hw);
-        ctx.lineTo(op.canvasX, op.canvasY + hw);
+        const isDoor = op.kind === 'door';
+        ctx.strokeStyle = isSelOp ? '#ffffff' : isDoor ? '#d4904a' : '#88d4ff';
+        ctx.lineWidth = (isSelOp ? 4 : 3) / v.scale;
+        ctx.beginPath();
+        if (op.wallAxis === 'h') {
+          ctx.moveTo(op.canvasX - hw, op.canvasY);
+          ctx.lineTo(op.canvasX + hw, op.canvasY);
+        } else {
+          ctx.moveTo(op.canvasX, op.canvasY - hw);
+          ctx.lineTo(op.canvasX, op.canvasY + hw);
+        }
+        ctx.stroke();
+        ctx.fillStyle = isDoor ? '#d4904a' : '#88d4ff';
+        ctx.font = `bold ${8 / v.scale}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText(isDoor ? 'D' : 'W', op.canvasX, op.canvasY - 5 / v.scale);
       }
-      ctx.stroke();
-      // 種別ラベル
-      ctx.fillStyle = isDoor ? '#d4904a' : '#44ccff';
-      ctx.font = `bold 8px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText(isDoor ? 'D' : 'W', op.canvasX, op.canvasY - 5);
       ctx.restore();
     }
 
     // opening モード: ホバープレビュー
     if (mode === 'opening' && hoverWall) {
-      const hw = (openingKind === 'door' ? DEFAULT_DOOR_W : DEFAULT_WIN_W) / 2;
       ctx.save();
-      ctx.strokeStyle = openingKind === 'door' ? 'rgba(212,144,74,0.6)' : 'rgba(68,204,255,0.6)';
-      ctx.lineWidth = 3;
-      ctx.setLineDash([4, 3]);
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      if (hoverWall.wallAxis === 'h') {
-        ctx.moveTo(hoverWall.canvasX - hw, hoverWall.canvasY);
-        ctx.lineTo(hoverWall.canvasX + hw, hoverWall.canvasY);
+      if (openingKind === 'column') {
+        const hw = DEFAULT_COL_W / 2;
+        ctx.fillStyle = 'rgba(153,153,153,0.5)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+        ctx.lineWidth = 1 / v.scale;
+        ctx.setLineDash([4 / v.scale, 3 / v.scale]);
+        if (hoverWall.wallAxis === 'h') {
+          ctx.fillRect(hoverWall.canvasX - hw, hoverWall.canvasY - hw, DEFAULT_COL_W, DEFAULT_COL_W);
+          ctx.strokeRect(hoverWall.canvasX - hw, hoverWall.canvasY - hw, DEFAULT_COL_W, DEFAULT_COL_W);
+        } else {
+          ctx.fillRect(hoverWall.canvasX - hw, hoverWall.canvasY - hw, DEFAULT_COL_W, DEFAULT_COL_W);
+          ctx.strokeRect(hoverWall.canvasX - hw, hoverWall.canvasY - hw, DEFAULT_COL_W, DEFAULT_COL_W);
+        }
       } else {
-        ctx.moveTo(hoverWall.canvasX, hoverWall.canvasY - hw);
-        ctx.lineTo(hoverWall.canvasX, hoverWall.canvasY + hw);
+        const hw = (openingKind === 'door' ? DEFAULT_DOOR_W : DEFAULT_WIN_W) / 2;
+        ctx.strokeStyle = openingKind === 'door' ? 'rgba(212,144,74,0.6)' : 'rgba(136,212,255,0.6)';
+        ctx.lineWidth = 3 / v.scale;
+        ctx.setLineDash([4 / v.scale, 3 / v.scale]);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        if (hoverWall.wallAxis === 'h') {
+          ctx.moveTo(hoverWall.canvasX - hw, hoverWall.canvasY);
+          ctx.lineTo(hoverWall.canvasX + hw, hoverWall.canvasY);
+        } else {
+          ctx.moveTo(hoverWall.canvasX, hoverWall.canvasY - hw);
+          ctx.lineTo(hoverWall.canvasX, hoverWall.canvasY + hw);
+        }
+        ctx.stroke();
       }
-      ctx.stroke();
       ctx.restore();
     }
 
-    // scale bar
-    const barX = 8, barY = CANVAS_H - 10, barW = PX_PER_M;
+    ctx.restore(); // end view transform
+
+    // scale bar (always screen space)
+    const barX = 8, barY = CANVAS_H - 10, barW = PX_PER_M * v.scale;
     ctx.strokeStyle = '#aaa';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -248,26 +324,51 @@ export default function FloorPlanEditor() {
     ctx.font = '9px sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText('1 m', barX + barW + 3, barY);
-  }, [rooms, selectedRoomId, dragState, mode, openings, selectedOpeningId, hoverWall, openingKind]);
+  }, [rooms, selectedRoomId, dragState, mode, openings, selectedOpeningId, hoverWall, openingKind, view]);
 
   useEffect(() => { redraw(); }, [redraw]);
 
+  // ---- wheel zoom (non-passive) ----
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const cssX = e.clientX - rect.left;
+      const cssY = e.clientY - rect.top;
+      setView((prev) => {
+        const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+        const newScale = Math.max(0.3, Math.min(8, prev.scale * factor));
+        // zoom towards cursor
+        const newPanX = cssX - (cssX - prev.panX) * (newScale / prev.scale);
+        const newPanY = cssY - (cssY - prev.panY) * (newScale / prev.scale);
+        return { scale: newScale, panX: newPanX, panY: newPanY };
+      });
+    };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, []);
+
   // ---- pointer helpers ----
-  const getPos = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const getCSS = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current!.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+  const getPos = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    return cssPxToWorld(getCSS(e), viewRef.current);
   };
 
   const hitCorner = (room: Room, px: number, py: number) => {
     const c = corners(room);
+    const threshold = HANDLE_R / viewRef.current.scale;
     for (const [key, pt] of Object.entries(c)) {
-      if (dist(px, py, pt.x, pt.y) <= HANDLE_R) return key as 'tl' | 'tr' | 'bl' | 'br';
+      if (dist(px, py, pt.x, pt.y) <= threshold) return key as 'tl' | 'tr' | 'bl' | 'br';
     }
     return null;
   };
 
   const hitRoom = (px: number, py: number): Room | null => {
-    // reverse so topmost rendered room is hit first
     for (let i = rooms.length - 1; i >= 0; i--) {
       const r = rooms[i];
       if (px >= r.x && px <= r.x + r.width && py >= r.y && py <= r.y + r.height) return r;
@@ -275,32 +376,55 @@ export default function FloorPlanEditor() {
     return null;
   };
 
+  const hitOpening = (px: number, py: number) => {
+    const threshold = 8 / viewRef.current.scale;
+    return openings.find((op) => {
+      const hw = op.widthPx / 2;
+      if (op.kind === 'column') {
+        const dh = (op.depthPx ?? op.widthPx) / 2;
+        return Math.abs(op.canvasX - px) <= hw && Math.abs(op.canvasY - py) <= dh;
+      }
+      if (op.wallAxis === 'h') return Math.abs(op.canvasY - py) < threshold && px >= op.canvasX - hw && px <= op.canvasX + hw;
+      return Math.abs(op.canvasX - px) < threshold && py >= op.canvasY - hw && py <= op.canvasY + hw;
+    });
+  };
+
   // ---- mouse handlers ----
   const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // middle mouse → pan
+    if (e.button === 1) {
+      e.preventDefault();
+      const css = getCSS(e);
+      setDragState({ kind: 'pan', startPanX: viewRef.current.panX, startPanY: viewRef.current.panY, startMouseX: css.x, startMouseY: css.y });
+      return;
+    }
+
     const { x, y } = getPos(e);
 
     if (mode === 'opening') {
-      // 既存の開口をクリックで選択
-      const hitOp = openings.find((op) => {
-        const hw = op.widthPx / 2;
-        if (op.wallAxis === 'h') return Math.abs(op.canvasY - y) < 8 && x >= op.canvasX - hw && x <= op.canvasX + hw;
-        return Math.abs(op.canvasX - x) < 8 && y >= op.canvasY - hw && y <= op.canvasY + hw;
-      });
-      if (hitOp) { selectOpening(hitOp.id); return; }
+      // 既存開口クリック → 選択 or ドラッグ開始
+      const hitOp = hitOpening(x, y);
+      if (hitOp) {
+        selectOpening(hitOp.id);
+        setDragState({ kind: 'move-opening', openingId: hitOp.id, startWX: x, startWY: y, origCX: hitOp.canvasX, origCY: hitOp.canvasY });
+        return;
+      }
 
       // 壁スナップして新規追加
       const wall = findNearestWall(rooms, x, y);
       if (wall) {
         const isDoor = openingKind === 'door';
+        const isColumn = openingKind === 'column';
         addOpening({
           id: crypto.randomUUID(),
           kind: openingKind,
           canvasX: wall.canvasX,
           canvasY: wall.canvasY,
           wallAxis: wall.wallAxis,
-          widthPx: isDoor ? DEFAULT_DOOR_W : DEFAULT_WIN_W,
-          height: isDoor ? 2.0 : 1.1,
-          sillHeight: isDoor ? 0 : 0.9,
+          widthPx: isDoor ? DEFAULT_DOOR_W : isColumn ? DEFAULT_COL_W : DEFAULT_WIN_W,
+          depthPx: isColumn ? DEFAULT_COL_W : undefined,
+          height: isDoor ? 2.0 : isColumn ? 2.4 : 1.1,
+          sillHeight: isDoor || isColumn ? 0 : 0.9,
         });
         selectOpening(null);
       }
@@ -324,7 +448,6 @@ export default function FloorPlanEditor() {
       }
     }
 
-    // check interior hit
     const hit = hitRoom(x, y);
     if (hit) {
       selectRoom(hit.id);
@@ -335,10 +458,33 @@ export default function FloorPlanEditor() {
   };
 
   const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const { x, y } = getPos(e);
+    const css = getCSS(e);
+    const { x, y } = cssPxToWorld(css, viewRef.current);
 
-    // opening モードのホバー
+    if (dragState?.kind === 'pan') {
+      setView((prev) => ({
+        ...prev,
+        panX: dragState.startPanX + (css.x - dragState.startMouseX),
+        panY: dragState.startPanY + (css.y - dragState.startMouseY),
+      }));
+      return;
+    }
+
     if (mode === 'opening') {
+      if (dragState?.kind === 'move-opening') {
+        const dx = x - dragState.startWX;
+        const dy = y - dragState.startWY;
+        const newCX = dragState.origCX + dx;
+        const newCY = dragState.origCY + dy;
+        // snap to nearest wall
+        const wall = findNearestWall(rooms, newCX, newCY);
+        if (wall) {
+          updateOpening(dragState.openingId, { canvasX: wall.canvasX, canvasY: wall.canvasY, wallAxis: wall.wallAxis });
+        } else {
+          updateOpening(dragState.openingId, { canvasX: newCX, canvasY: newCY });
+        }
+        return;
+      }
       setHoverWall(findNearestWall(rooms, x, y));
       return;
     }
@@ -402,6 +548,22 @@ export default function FloorPlanEditor() {
     setDragState(null);
   };
 
+  // fit-to-view: show all rooms in canvas
+  const fitToView = useCallback(() => {
+    if (rooms.length === 0) { setView({ scale: 1, panX: 0, panY: 0 }); return; }
+    const xs = rooms.flatMap((r) => [r.x, r.x + r.width]);
+    const ys = rooms.flatMap((r) => [r.y, r.y + r.height]);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const pad = 20;
+    const scaleX = (CANVAS_W - pad * 2) / (maxX - minX || 1);
+    const scaleY = (CANVAS_H - pad * 2) / (maxY - minY || 1);
+    const s = Math.min(scaleX, scaleY, 4);
+    const panX = pad + (CANVAS_W - pad * 2 - (maxX - minX) * s) / 2 - minX * s;
+    const panY = pad + (CANVAS_H - pad * 2 - (maxY - minY) * s) / 2 - minY * s;
+    setView({ scale: s, panX, panY });
+  }, [rooms]);
+
   // keyboard: Delete removes selected room / opening
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -442,6 +604,14 @@ export default function FloorPlanEditor() {
   };
 
   const selectedRoom = rooms.find((r) => r.id === selectedRoomId);
+
+  // cursor style
+  const canvasCursor = (() => {
+    if (dragState?.kind === 'pan') return 'grabbing';
+    if (mode === 'edit') return 'default';
+    if (mode === 'opening') return 'crosshair';
+    return 'crosshair';
+  })();
 
   return (
     <div className="floor-plan-editor">
@@ -495,8 +665,12 @@ export default function FloorPlanEditor() {
               className={`opening-kind-btn ${openingKind === 'window' ? 'active' : ''}`}
               onClick={() => setOpeningKind('window')}
             >🪟 窓</button>
+            <button
+              className={`opening-kind-btn ${openingKind === 'column' ? 'active' : ''}`}
+              onClick={() => setOpeningKind('column')}
+            >🏛 柱</button>
           </div>
-          <p className="hint">壁の近くをクリックして配置　クリックで選択・Deleteで削除</p>
+          <p className="hint">壁の近くをクリックして配置　ドラッグで移動　Deleteで削除</p>
           {/* 建具リスト */}
           {openings.length > 0 && (
             <div className="opening-list">
@@ -506,11 +680,14 @@ export default function FloorPlanEditor() {
                   className={`opening-chip ${op.id === selectedOpeningId ? 'selected' : ''}`}
                   onClick={() => selectOpening(op.id === selectedOpeningId ? null : op.id)}
                 >
-                  <span style={{ color: op.kind === 'door' ? '#d4904a' : '#44ccff' }}>
-                    {op.kind === 'door' ? '🚪' : '🪟'}
+                  <span style={{ color: op.kind === 'door' ? '#d4904a' : op.kind === 'window' ? '#88d4ff' : '#aaaaaa' }}>
+                    {op.kind === 'door' ? '🚪' : op.kind === 'window' ? '🪟' : '🏛'}
                   </span>
                   <span className="opening-chip-label">
-                    {op.kind === 'door' ? 'ドア' : '窓'} {Math.round(op.widthPx * 50)}mm
+                    {op.kind === 'door' ? 'ドア' : op.kind === 'window' ? '窓' : '柱'}{' '}
+                    {Math.round(op.widthPx * 50)}
+                    {op.kind === 'column' ? `×${Math.round((op.depthPx ?? op.widthPx) * 50)}` : ''}
+                    mm
                   </span>
                   <button
                     className="remove-btn"
@@ -527,26 +704,44 @@ export default function FloorPlanEditor() {
             const sel = openings.find((o) => o.id === selectedOpeningId);
             if (!sel) return null;
             const widthMM = Math.round(sel.widthPx * 50);
+            const depthMM = Math.round((sel.depthPx ?? sel.widthPx) * 50);
+            const isColumn = sel.kind === 'column';
             return (
               <div className="opening-props">
                 <div className="opening-props-title">
-                  {sel.kind === 'door' ? '🚪 ドア' : '🪟 窓'} を編集
+                  {sel.kind === 'door' ? '🚪 ドア' : sel.kind === 'window' ? '🪟 窓' : '🏛 柱'} を編集
                 </div>
                 <div className="props-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
                   <label className="props-num-label">
                     幅
                     <div className="num-input-row">
                       <input
-                        type="number" className="props-num" step="10" min="300" max="4000"
+                        type="number" className="props-num" step="10" min="100" max="4000"
                         value={widthMM}
                         onChange={(e) => {
                           const v = parseFloat(e.target.value);
-                          if (!isNaN(v) && v >= 300) updateOpening(sel.id, { widthPx: Math.round(v / 50) });
+                          if (!isNaN(v) && v >= 100) updateOpening(sel.id, { widthPx: Math.round(v / 50) });
                         }}
                       />
                       <span className="props-unit">mm</span>
                     </div>
                   </label>
+                  {isColumn && (
+                    <label className="props-num-label">
+                      奥行
+                      <div className="num-input-row">
+                        <input
+                          type="number" className="props-num" step="10" min="100" max="4000"
+                          value={depthMM}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            if (!isNaN(v) && v >= 100) updateOpening(sel.id, { depthPx: Math.round(v / 50) });
+                          }}
+                        />
+                        <span className="props-unit">mm</span>
+                      </div>
+                    </label>
+                  )}
                   <label className="props-num-label">
                     高さ
                     <div className="num-input-row">
@@ -561,20 +756,22 @@ export default function FloorPlanEditor() {
                       <span className="props-unit">mm</span>
                     </div>
                   </label>
-                  <label className="props-num-label">
-                    {sel.kind === 'window' ? '窓台高さ' : '床高さ'}
-                    <div className="num-input-row">
-                      <input
-                        type="number" className="props-num" step="10" min="0" max="2500"
-                        value={Math.round(sel.sillHeight * 1000)}
-                        onChange={(e) => {
-                          const v = parseFloat(e.target.value);
-                          if (!isNaN(v) && v >= 0) updateOpening(sel.id, { sillHeight: v / 1000 });
-                        }}
-                      />
-                      <span className="props-unit">mm</span>
-                    </div>
-                  </label>
+                  {!isColumn && (
+                    <label className="props-num-label">
+                      {sel.kind === 'window' ? '窓台高さ' : '床高さ'}
+                      <div className="num-input-row">
+                        <input
+                          type="number" className="props-num" step="10" min="0" max="2500"
+                          value={Math.round(sel.sillHeight * 1000)}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            if (!isNaN(v) && v >= 0) updateOpening(sel.id, { sillHeight: v / 1000 });
+                          }}
+                        />
+                        <span className="props-unit">mm</span>
+                      </div>
+                    </label>
+                  )}
                 </div>
                 <MetaEditor
                   meta={sel.meta}
@@ -648,18 +845,49 @@ export default function FloorPlanEditor() {
         <p className="hint" style={{ marginTop: 4 }}>部屋をクリックして選択</p>
       )}
 
-      {/* キャンバス */}
-      <canvas
-        ref={canvasRef}
-        width={CANVAS_W}
-        height={CANVAS_H}
-        className="floor-canvas"
-        style={{ cursor: mode === 'edit' ? 'default' : 'crosshair' }}
-        onMouseDown={onMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={onMouseUp}
-        onMouseLeave={() => { onMouseUp(); setHoverWall(null); }}
-      />
+      {/* キャンバス + ズームコントロール */}
+      <div style={{ position: 'relative', display: 'inline-block' }}>
+        <canvas
+          ref={canvasRef}
+          width={CANVAS_W}
+          height={CANVAS_H}
+          className="floor-canvas"
+          style={{ cursor: canvasCursor }}
+          onMouseDown={onMouseDown}
+          onMouseMove={onMouseMove}
+          onMouseUp={onMouseUp}
+          onMouseLeave={() => { onMouseUp(); setHoverWall(null); }}
+          onContextMenu={(e) => e.preventDefault()}
+        />
+        {/* zoom buttons */}
+        <div style={{ position: 'absolute', bottom: 18, right: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <button
+            className="zoom-btn"
+            title="拡大"
+            onClick={() => setView((v) => {
+              const f = 1.25;
+              const cx = CANVAS_W / 2, cy = CANVAS_H / 2;
+              const ns = Math.min(8, v.scale * f);
+              return { scale: ns, panX: cx - (cx - v.panX) * (ns / v.scale), panY: cy - (cy - v.panY) * (ns / v.scale) };
+            })}
+          >＋</button>
+          <button
+            className="zoom-btn"
+            title="縮小"
+            onClick={() => setView((v) => {
+              const f = 1 / 1.25;
+              const cx = CANVAS_W / 2, cy = CANVAS_H / 2;
+              const ns = Math.max(0.3, v.scale * f);
+              return { scale: ns, panX: cx - (cx - v.panX) * (ns / v.scale), panY: cy - (cy - v.panY) * (ns / v.scale) };
+            })}
+          >－</button>
+          <button
+            className="zoom-btn"
+            title="全体表示"
+            onClick={fitToView}
+          >⊡</button>
+        </div>
+      </div>
 
       {/* 部屋リスト */}
       {rooms.length > 0 && (

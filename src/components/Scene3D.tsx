@@ -175,6 +175,24 @@ function OpeningMesh({ opening }: { opening: Opening }) {
     onPointerLeave: () => { gl.domElement.style.cursor = 'auto'; },
   };
 
+  if (opening.kind === 'column') {
+    const depthM = (opening.depthPx ?? opening.widthPx) * SCALE;
+    return (
+      <group position={[worldX, opening.sillHeight + h / 2, worldZ]} rotation={[0, rotY, 0]} onClick={handleClick} {...hoverHandlers}>
+        <mesh castShadow receiveShadow>
+          <boxGeometry args={[widthM, h, depthM]} />
+          <meshStandardMaterial color="#aaaaaa" roughness={0.7} />
+        </mesh>
+        {isSelected && (
+          <mesh>
+            <boxGeometry args={[widthM + 0.06, h + 0.06, depthM + 0.06]} />
+            <meshStandardMaterial color="#ffee00" wireframe />
+          </mesh>
+        )}
+      </group>
+    );
+  }
+
   if (opening.kind === 'window') {
     return (
       <group position={[worldX, posY, worldZ]} rotation={[0, rotY, 0]} onClick={handleClick} {...hoverHandlers}>
@@ -191,10 +209,10 @@ function OpeningMesh({ opening }: { opening: Opening }) {
         <mesh castShadow position={[0, -h / 2 + ft / 2, 0]}>
           <boxGeometry args={[widthM, ft, wt]} /><meshStandardMaterial color="#2a2a2a" />
         </mesh>
-        {/* ガラス（半透明）*/}
+        {/* ガラス（半透明・薄水色）*/}
         <mesh position={[0, 0, 0]}>
           <boxGeometry args={[widthM - 2 * ft, h - 2 * ft, wt * 0.25]} />
-          <meshStandardMaterial color="#88ccee" transparent opacity={0.35} />
+          <meshStandardMaterial color="#b8e8ff" transparent opacity={0.55} />
         </mesh>
         {/* 選択ハイライト */}
         {isSelected && (

@@ -39,7 +39,7 @@ export interface MeasurePoint {
   z: number;
 }
 
-export type OpeningKind = 'door' | 'window';
+export type OpeningKind = 'door' | 'window' | 'column';
 
 export interface Opening {
   id: string;
@@ -49,11 +49,13 @@ export interface Opening {
   canvasY: number;
   /** 壁の向き: 'h'=横走り壁(上下), 'v'=縦走り壁(左右) */
   wallAxis: 'h' | 'v';
-  /** 開口幅（キャンバスpx）*/
+  /** 壁方向の幅（キャンバスpx）*/
   widthPx: number;
-  /** 開口高さ（m）*/
+  /** 壁直交方向の奥行（キャンバスpx）柱のみ使用 */
+  depthPx?: number;
+  /** 高さ（m）*/
   height: number;
-  /** 床からの高さ（m）: ドア=0, 窓≈0.9 */
+  /** 床からの下端高さ（m）: ドア=0, 窓≈0.9, 柱=0 */
   sillHeight: number;
   meta?: ItemMeta;
 }
