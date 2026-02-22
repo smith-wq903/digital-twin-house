@@ -5,6 +5,7 @@ import { OrbitControls, Text, Grid, Environment, Line } from '@react-three/drei'
 import { useThree } from '@react-three/fiber';
 import { useHouseStore } from '../store/useHouseStore';
 import { getCollidingIds } from '../utils/collision';
+import { findNearestWall, columnEdgeCenter } from '../utils/wallSnap';
 import { FurnitureModel } from './FurnitureModels';
 import InspectorPanel from './InspectorPanel';
 import type { Room, Furniture, Opening } from '../types';
@@ -150,35 +151,92 @@ function FurnitureMesh({
   );
 }
 
-// ---- 窓・ドア ----
-function OpeningMesh({ opening }: { opening: Opening }) {
-  const { selectedOpeningId, selectOpening, selectFurniture } = useHouseStore();
-  const { gl } = useThree();
+// ---- 窓・ドア・柱 ----
+function OpeningMesh({
+  opening,
+  orbitRef,
+}: {
+  opening: Opening;
+  orbitRef: React.RefObject<OrbitControlsType | null>;
+}) {
+  const { rooms, selectedOpeningId, selectOpening, selectFurniture, updateOpening } = useHouseStore();
+  const { camera, gl } = useThree();
   const isSelected = selectedOpeningId === opening.id;
+  const isDragging = useRef(false);
+  const floorPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), []);
+
   const widthM = opening.widthPx * SCALE;
   const h = opening.height;
   const worldX = opening.canvasX * SCALE - OFFSET;
   const worldZ = opening.canvasY * SCALE - OFFSET;
   const posY = opening.sillHeight + h / 2;
   const rotY = opening.wallAxis === 'v' ? Math.PI / 2 : 0;
-  const wt = 0.13; // opening thickness (≥ wall thickness 0.08)
-  const ft = 0.055; // frame bar thickness
+  const wt = 0.13;
+  const ft = 0.055;
+
+  const onPointerDown = (e: ThreeEvent<PointerEvent>) => {
+    e.stopPropagation();
+    isDragging.current = false;
+    selectOpening(opening.id);
+    selectFurniture(null);
+    if (orbitRef.current) orbitRef.current.enabled = false;
+    gl.domElement.style.cursor = 'grabbing';
+    useHouseStore.temporal.getState().pause();
+
+    const raycaster = new THREE.Raycaster();
+    const onMove = (ev: PointerEvent) => {
+      isDragging.current = true;
+      const rect = gl.domElement.getBoundingClientRect();
+      const nx = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+      const ny = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(new THREE.Vector2(nx, ny), camera);
+      const target = new THREE.Vector3();
+      if (raycaster.ray.intersectPlane(floorPlane, target)) {
+        // 3D world → canvas px
+        const cx = (target.x + OFFSET) / SCALE;
+        const cy = (target.z + OFFSET) / SCALE;
+        // 距離無制限で最寄りの壁にスナップ
+        const wall = findNearestWall(rooms, cx, cy, Infinity);
+        if (wall) {
+          if (opening.kind === 'column') {
+            // 柱: 辺が壁に接するよう中心をオフセット
+            const depthPx = opening.depthPx ?? opening.widthPx;
+            const pos = columnEdgeCenter({ cx, cy }, wall, depthPx);
+            updateOpening(opening.id, { canvasX: pos.canvasX, canvasY: pos.canvasY, wallAxis: wall.wallAxis });
+          } else {
+            updateOpening(opening.id, { canvasX: wall.canvasX, canvasY: wall.canvasY, wallAxis: wall.wallAxis });
+          }
+        }
+      }
+    };
+    const onUp = () => {
+      if (orbitRef.current) orbitRef.current.enabled = true;
+      gl.domElement.style.cursor = 'grab';
+      gl.domElement.removeEventListener('pointermove', onMove);
+      gl.domElement.removeEventListener('pointerup', onUp);
+      useHouseStore.temporal.getState().resume();
+      setTimeout(() => { isDragging.current = false; }, 50);
+    };
+    gl.domElement.addEventListener('pointermove', onMove);
+    gl.domElement.addEventListener('pointerup', onUp);
+  };
 
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
+    if (isDragging.current) return;
     selectOpening(opening.id);
     selectFurniture(null);
   };
 
   const hoverHandlers = {
-    onPointerEnter: () => { gl.domElement.style.cursor = 'pointer'; },
-    onPointerLeave: () => { gl.domElement.style.cursor = 'auto'; },
+    onPointerEnter: () => { gl.domElement.style.cursor = 'grab'; },
+    onPointerLeave: () => { if (!isDragging.current) gl.domElement.style.cursor = 'auto'; },
   };
 
   if (opening.kind === 'column') {
     const depthM = (opening.depthPx ?? opening.widthPx) * SCALE;
     return (
-      <group position={[worldX, opening.sillHeight + h / 2, worldZ]} rotation={[0, rotY, 0]} onClick={handleClick} {...hoverHandlers}>
+      <group position={[worldX, opening.sillHeight + h / 2, worldZ]} rotation={[0, rotY, 0]} onPointerDown={onPointerDown} onClick={handleClick} {...hoverHandlers}>
         <mesh castShadow receiveShadow>
           <boxGeometry args={[widthM, h, depthM]} />
           <meshStandardMaterial color="#aaaaaa" roughness={0.7} />
@@ -195,7 +253,7 @@ function OpeningMesh({ opening }: { opening: Opening }) {
 
   if (opening.kind === 'window') {
     return (
-      <group position={[worldX, posY, worldZ]} rotation={[0, rotY, 0]} onClick={handleClick} {...hoverHandlers}>
+      <group position={[worldX, posY, worldZ]} rotation={[0, rotY, 0]} onPointerDown={onPointerDown} onClick={handleClick} {...hoverHandlers}>
         {/* 枠 4辺 */}
         <mesh castShadow position={[-widthM / 2 + ft / 2, 0, 0]}>
           <boxGeometry args={[ft, h, wt]} /><meshStandardMaterial color="#2a2a2a" />
@@ -227,7 +285,7 @@ function OpeningMesh({ opening }: { opening: Opening }) {
 
   // ドア
   return (
-    <group position={[worldX, posY, worldZ]} rotation={[0, rotY, 0]} onClick={handleClick} {...hoverHandlers}>
+    <group position={[worldX, posY, worldZ]} rotation={[0, rotY, 0]} onPointerDown={onPointerDown} onClick={handleClick} {...hoverHandlers}>
       {/* 枠 左右 + 上 */}
       <mesh castShadow position={[-widthM / 2 + ft / 2, 0, 0]}>
         <boxGeometry args={[ft, h, wt]} /><meshStandardMaterial color="#5c3d1e" />
@@ -509,7 +567,7 @@ export default function Scene3D() {
         <GridLabels />
 
         {rooms.map((r) => <RoomMesh key={r.id} room={r} />)}
-        {openings.map((o) => <OpeningMesh key={o.id} opening={o} />)}
+        {openings.map((o) => <OpeningMesh key={o.id} opening={o} orbitRef={orbitRef} />)}
 
         {furniture.map((f) => (
           <FurnitureMesh

@@ -1,6 +1,8 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { useHouseStore } from '../store/useHouseStore';
 import { analyzeFloorPlan } from '../utils/floorPlanAnalyzer';
+import { findNearestWall, columnEdgeCenter } from '../utils/wallSnap';
+import type { WallHit } from '../utils/wallSnap';
 import type { Room, OpeningKind } from '../types';
 import MetaEditor from './MetaEditor';
 
@@ -13,19 +15,12 @@ const CANVAS_H = 280;
 /** 1px = SCALE m  (0.05 → 20px = 1m) */
 const PX_PER_M = 1 / 0.05; // 20
 const HANDLE_R = 7; // handle hit radius in px
-const WALL_SNAP = 14; // px snap distance for opening placement
 /** デフォルト開口幅 (px) */
 const DEFAULT_DOOR_W = 20;  // 1.0m
 const DEFAULT_WIN_W  = 28;  // 1.4m
 const DEFAULT_COL_W  = 10;  // 0.5m
 
 type EditorMode = 'draw' | 'edit' | 'opening';
-
-interface WallHit {
-  canvasX: number;
-  canvasY: number;
-  wallAxis: 'h' | 'v';
-}
 
 /** ビュー変換: scale・panX・panY (キャンバスpx基準) */
 interface ViewState {
@@ -40,30 +35,6 @@ function cssPxToWorld(cssPx: { x: number; y: number }, view: ViewState) {
     x: (cssPx.x - view.panX) / view.scale,
     y: (cssPx.y - view.panY) / view.scale,
   };
-}
-
-/** 最も近い壁上のスナップ点を返す */
-function findNearestWall(rooms: Room[], cx: number, cy: number): WallHit | null {
-  let best: WallHit | null = null;
-  let bestDist = WALL_SNAP;
-  for (const room of rooms) {
-    const segs: { x1: number; y1: number; x2: number; y2: number; axis: 'h' | 'v' }[] = [
-      { x1: room.x, y1: room.y, x2: room.x + room.width, y2: room.y, axis: 'h' },
-      { x1: room.x, y1: room.y + room.height, x2: room.x + room.width, y2: room.y + room.height, axis: 'h' },
-      { x1: room.x, y1: room.y, x2: room.x, y2: room.y + room.height, axis: 'v' },
-      { x1: room.x + room.width, y1: room.y, x2: room.x + room.width, y2: room.y + room.height, axis: 'v' },
-    ];
-    for (const seg of segs) {
-      const dx = seg.x2 - seg.x1, dy = seg.y2 - seg.y1;
-      const lenSq = dx * dx + dy * dy;
-      if (lenSq === 0) continue;
-      const t = Math.max(0.05, Math.min(0.95, ((cx - seg.x1) * dx + (cy - seg.y1) * dy) / lenSq));
-      const px = seg.x1 + t * dx, py = seg.y1 + t * dy;
-      const d = Math.hypot(cx - px, cy - py);
-      if (d < bestDist) { bestDist = d; best = { canvasX: px, canvasY: py, wallAxis: seg.axis }; }
-    }
-  }
-  return best;
 }
 
 interface DrawDrag {
@@ -415,11 +386,15 @@ export default function FloorPlanEditor() {
       if (wall) {
         const isDoor = openingKind === 'door';
         const isColumn = openingKind === 'column';
+        // 柱は辺が壁に接するよう中心をオフセット
+        const placePos = isColumn
+          ? columnEdgeCenter({ cx: x, cy: y }, wall, DEFAULT_COL_W)
+          : { canvasX: wall.canvasX, canvasY: wall.canvasY };
         addOpening({
           id: crypto.randomUUID(),
           kind: openingKind,
-          canvasX: wall.canvasX,
-          canvasY: wall.canvasY,
+          canvasX: placePos.canvasX,
+          canvasY: placePos.canvasY,
           wallAxis: wall.wallAxis,
           widthPx: isDoor ? DEFAULT_DOOR_W : isColumn ? DEFAULT_COL_W : DEFAULT_WIN_W,
           depthPx: isColumn ? DEFAULT_COL_W : undefined,
@@ -476,10 +451,17 @@ export default function FloorPlanEditor() {
         const dy = y - dragState.startWY;
         const newCX = dragState.origCX + dx;
         const newCY = dragState.origCY + dy;
-        // snap to nearest wall
+        const op = openings.find((o) => o.id === dragState.openingId);
         const wall = findNearestWall(rooms, newCX, newCY);
         if (wall) {
-          updateOpening(dragState.openingId, { canvasX: wall.canvasX, canvasY: wall.canvasY, wallAxis: wall.wallAxis });
+          if (op?.kind === 'column') {
+            // 柱: 辺が壁に接するよう中心をオフセット
+            const depthPx = op.depthPx ?? op.widthPx;
+            const pos = columnEdgeCenter({ cx: newCX, cy: newCY }, wall, depthPx);
+            updateOpening(dragState.openingId, { canvasX: pos.canvasX, canvasY: pos.canvasY, wallAxis: wall.wallAxis });
+          } else {
+            updateOpening(dragState.openingId, { canvasX: wall.canvasX, canvasY: wall.canvasY, wallAxis: wall.wallAxis });
+          }
         } else {
           updateOpening(dragState.openingId, { canvasX: newCX, canvasY: newCY });
         }
