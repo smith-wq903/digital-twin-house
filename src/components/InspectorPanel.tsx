@@ -2,7 +2,8 @@ import { useHouseStore } from '../store/useHouseStore';
 import MetaEditor from './MetaEditor';
 import type { OpeningKind } from '../types';
 
-const SCALE = 0.05; // 1px = 0.05m
+// 1 canvas px = 0.05m = 50mm
+const PX_TO_MM = 50;
 
 // ---- 家具インスペクター ----
 function FurnitureInspector() {
@@ -18,9 +19,9 @@ function FurnitureInspector() {
     Math.round(((rad % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) * (180 / Math.PI));
   const degToRad = (deg: number) => (deg % 360) * (Math.PI / 180);
 
-  const handleSizeChange = (axis: 0 | 1 | 2, val: number) => {
+  const handleSizeChange = (axis: 0 | 1 | 2, mm: number) => {
     const s = [...item.size] as [number, number, number];
-    s[axis] = Math.max(0.1, val);
+    s[axis] = Math.max(10, mm) / 1000;
     updateFurnitureSize(item.id, s);
   };
 
@@ -49,11 +50,11 @@ function FurnitureInspector() {
               {label}
               <div className="insp-num-row">
                 <input
-                  type="number" className="insp-num" step="0.1" min="0.1"
-                  value={+item.size[i].toFixed(2)}
+                  type="number" className="insp-num" step="10" min="10"
+                  value={Math.round(item.size[i] * 1000)}
                   onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v)) handleSizeChange(i as 0 | 1 | 2, v); }}
                 />
-                <span className="insp-unit">m</span>
+                <span className="insp-unit">mm</span>
               </div>
             </label>
           ))}
@@ -80,12 +81,12 @@ function FurnitureInspector() {
           <span className="insp-label">床高さ</span>
           <div className="insp-num-row">
             <input
-              type="number" className="insp-num" step="0.05" min="0"
-              style={{ width: 64 }}
-              value={+(item.elevation ?? 0).toFixed(2)}
-              onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 0) updateFurnitureElevation(item.id, v); }}
+              type="number" className="insp-num" step="10" min="0"
+              style={{ width: 70 }}
+              value={Math.round((item.elevation ?? 0) * 1000)}
+              onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 0) updateFurnitureElevation(item.id, v / 1000); }}
             />
-            <span className="insp-unit">m</span>
+            <span className="insp-unit">mm</span>
           </div>
         </div>
 
@@ -124,7 +125,7 @@ function OpeningInspector() {
   const opening = openings.find((o) => o.id === selectedOpeningId);
   if (!opening) return null;
 
-  const widthM = +(opening.widthPx * SCALE).toFixed(2);
+  const widthMM = Math.round(opening.widthPx * PX_TO_MM);
   const kindLabel = opening.kind === 'door' ? 'ドア' : '窓';
 
   return (
@@ -155,15 +156,15 @@ function OpeningInspector() {
           <span className="insp-label">幅</span>
           <div className="insp-num-row">
             <input
-              type="number" className="insp-num" step="0.05" min="0.1"
-              style={{ width: 64 }}
-              value={widthM}
+              type="number" className="insp-num" step="10" min="100"
+              style={{ width: 70 }}
+              value={widthMM}
               onChange={(e) => {
                 const v = parseFloat(e.target.value);
-                if (!isNaN(v) && v > 0) updateOpening(opening.id, { widthPx: Math.round(v / SCALE) });
+                if (!isNaN(v) && v > 0) updateOpening(opening.id, { widthPx: Math.round(v / PX_TO_MM) });
               }}
             />
-            <span className="insp-unit">m</span>
+            <span className="insp-unit">mm</span>
           </div>
         </div>
 
@@ -172,15 +173,15 @@ function OpeningInspector() {
           <span className="insp-label">高さ</span>
           <div className="insp-num-row">
             <input
-              type="number" className="insp-num" step="0.05" min="0.1"
-              style={{ width: 64 }}
-              value={+opening.height.toFixed(2)}
+              type="number" className="insp-num" step="10" min="100"
+              style={{ width: 70 }}
+              value={Math.round(opening.height * 1000)}
               onChange={(e) => {
                 const v = parseFloat(e.target.value);
-                if (!isNaN(v) && v > 0) updateOpening(opening.id, { height: v });
+                if (!isNaN(v) && v > 0) updateOpening(opening.id, { height: v / 1000 });
               }}
             />
-            <span className="insp-unit">m</span>
+            <span className="insp-unit">mm</span>
           </div>
         </div>
 
@@ -189,15 +190,15 @@ function OpeningInspector() {
           <span className="insp-label">下端高さ</span>
           <div className="insp-num-row">
             <input
-              type="number" className="insp-num" step="0.05" min="0"
-              style={{ width: 64 }}
-              value={+opening.sillHeight.toFixed(2)}
+              type="number" className="insp-num" step="10" min="0"
+              style={{ width: 70 }}
+              value={Math.round(opening.sillHeight * 1000)}
               onChange={(e) => {
                 const v = parseFloat(e.target.value);
-                if (!isNaN(v) && v >= 0) updateOpening(opening.id, { sillHeight: v });
+                if (!isNaN(v) && v >= 0) updateOpening(opening.id, { sillHeight: v / 1000 });
               }}
             />
-            <span className="insp-unit">m</span>
+            <span className="insp-unit">mm</span>
           </div>
         </div>
 

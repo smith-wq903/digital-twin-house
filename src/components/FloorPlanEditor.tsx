@@ -510,7 +510,7 @@ export default function FloorPlanEditor() {
                     {op.kind === 'door' ? '🚪' : '🪟'}
                   </span>
                   <span className="opening-chip-label">
-                    {op.kind === 'door' ? 'ドア' : '窓'} {(op.widthPx * 0.05).toFixed(1)}m
+                    {op.kind === 'door' ? 'ドア' : '窓'} {Math.round(op.widthPx * 50)}mm
                   </span>
                   <button
                     className="remove-btn"
@@ -526,7 +526,7 @@ export default function FloorPlanEditor() {
           {(() => {
             const sel = openings.find((o) => o.id === selectedOpeningId);
             if (!sel) return null;
-            const widthM = +(sel.widthPx * 0.05).toFixed(2);
+            const widthMM = Math.round(sel.widthPx * 50);
             return (
               <div className="opening-props">
                 <div className="opening-props-title">
@@ -537,42 +537,42 @@ export default function FloorPlanEditor() {
                     幅
                     <div className="num-input-row">
                       <input
-                        type="number" className="props-num" step="0.05" min="0.3" max="4"
-                        value={widthM}
+                        type="number" className="props-num" step="10" min="300" max="4000"
+                        value={widthMM}
                         onChange={(e) => {
                           const v = parseFloat(e.target.value);
-                          if (!isNaN(v) && v >= 0.3) updateOpening(sel.id, { widthPx: v / 0.05 });
+                          if (!isNaN(v) && v >= 300) updateOpening(sel.id, { widthPx: Math.round(v / 50) });
                         }}
                       />
-                      <span className="props-unit">m</span>
+                      <span className="props-unit">mm</span>
                     </div>
                   </label>
                   <label className="props-num-label">
                     高さ
                     <div className="num-input-row">
                       <input
-                        type="number" className="props-num" step="0.05" min="0.3" max="3"
-                        value={+sel.height.toFixed(2)}
+                        type="number" className="props-num" step="10" min="300" max="3000"
+                        value={Math.round(sel.height * 1000)}
                         onChange={(e) => {
                           const v = parseFloat(e.target.value);
-                          if (!isNaN(v) && v >= 0.3) updateOpening(sel.id, { height: v });
+                          if (!isNaN(v) && v >= 300) updateOpening(sel.id, { height: v / 1000 });
                         }}
                       />
-                      <span className="props-unit">m</span>
+                      <span className="props-unit">mm</span>
                     </div>
                   </label>
                   <label className="props-num-label">
                     {sel.kind === 'window' ? '窓台高さ' : '床高さ'}
                     <div className="num-input-row">
                       <input
-                        type="number" className="props-num" step="0.05" min="0" max="2.5"
-                        value={+sel.sillHeight.toFixed(2)}
+                        type="number" className="props-num" step="10" min="0" max="2500"
+                        value={Math.round(sel.sillHeight * 1000)}
                         onChange={(e) => {
                           const v = parseFloat(e.target.value);
-                          if (!isNaN(v) && v >= 0) updateOpening(sel.id, { sillHeight: v });
+                          if (!isNaN(v) && v >= 0) updateOpening(sel.id, { sillHeight: v / 1000 });
                         }}
                       />
-                      <span className="props-unit">m</span>
+                      <span className="props-unit">mm</span>
                     </div>
                   </label>
                 </div>
@@ -614,10 +614,10 @@ export default function FloorPlanEditor() {
           <div className="props-grid">
             {(
               [
-                { label: 'X (m)', key: 'x' as const, toM: true },
-                { label: 'Y (m)', key: 'y' as const, toM: true },
-                { label: 'W (m)', key: 'width' as const, toM: true },
-                { label: 'H (m)', key: 'height' as const, toM: true },
+                { label: 'X (mm)', key: 'x' as const, toM: true },
+                { label: 'Y (mm)', key: 'y' as const, toM: true },
+                { label: 'W (mm)', key: 'width' as const, toM: true },
+                { label: 'H (mm)', key: 'height' as const, toM: true },
               ] as const
             ).map(({ label, key, toM }) => (
               <label key={key} className="props-num-label">
@@ -625,13 +625,13 @@ export default function FloorPlanEditor() {
                 <input
                   type="number"
                   className="props-num"
-                  step="0.1"
-                  min={key === 'width' || key === 'height' ? 0.1 : undefined}
-                  value={toM ? +(selectedRoom[key] / PX_PER_M).toFixed(2) : selectedRoom[key]}
+                  step="100"
+                  min={key === 'width' || key === 'height' ? 100 : undefined}
+                  value={toM ? Math.round(selectedRoom[key] / PX_PER_M * 1000) : selectedRoom[key]}
                   onChange={(e) => {
                     const v = parseFloat(e.target.value);
                     if (isNaN(v)) return;
-                    updateRoom(selectedRoom.id, { [key]: toM ? v * PX_PER_M : v });
+                    updateRoom(selectedRoom.id, { [key]: toM ? (v / 1000) * PX_PER_M : v });
                   }}
                 />
               </label>

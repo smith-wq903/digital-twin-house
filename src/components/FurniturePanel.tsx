@@ -53,7 +53,7 @@ export default function FurniturePanel() {
             key={tmpl.name}
             className="furniture-btn"
             onClick={() => handleAdd(tmpl)}
-            title={`${tmpl.name} (${tmpl.size.join(' × ')} m)`}
+            title={`${tmpl.name} (${tmpl.size.map(v => Math.round(v * 1000)).join(' × ')} mm)`}
           >
             <span className="furniture-emoji">{tmpl.emoji}</span>
             <span className="furniture-label">{tmpl.name}</span>

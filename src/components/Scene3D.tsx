@@ -349,16 +349,16 @@ function MeasurePanel() {
         <div className="measure-heights">
           <label className="measure-height-row">
             <span>地点1 高さ</span>
-            <input type="number" className="measure-height-input" value={h1} step="0.1" min="0" max="10"
-              onChange={(e) => setMeasureHeight(0, parseFloat(e.target.value) || 0)} />
-            <span className="measure-unit">m</span>
+            <input type="number" className="measure-height-input" value={Math.round(h1 * 1000)} step="100" min="0" max="10000"
+              onChange={(e) => setMeasureHeight(0, (parseFloat(e.target.value) || 0) / 1000)} />
+            <span className="measure-unit">mm</span>
           </label>
           {pts.length === 2 && (
             <label className="measure-height-row">
               <span>地点2 高さ</span>
-              <input type="number" className="measure-height-input" value={h2} step="0.1" min="0" max="10"
-                onChange={(e) => setMeasureHeight(1, parseFloat(e.target.value) || 0)} />
-              <span className="measure-unit">m</span>
+              <input type="number" className="measure-height-input" value={Math.round(h2 * 1000)} step="100" min="0" max="10000"
+                onChange={(e) => setMeasureHeight(1, (parseFloat(e.target.value) || 0) / 1000)} />
+              <span className="measure-unit">mm</span>
             </label>
           )}
         </div>
@@ -367,15 +367,15 @@ function MeasurePanel() {
         <div className="measure-results">
           <div className="measure-result-row">
             <span className="measure-label">水平距離</span>
-            <span className="measure-value">{hDist.toFixed(2)} m</span>
+            <span className="measure-value">{Math.round(hDist * 1000)} mm</span>
           </div>
           <div className="measure-result-row">
             <span className="measure-label">高低差</span>
-            <span className="measure-value">{vDiff.toFixed(2)} m</span>
+            <span className="measure-value">{Math.round(vDiff * 1000)} mm</span>
           </div>
           <div className="measure-result-row total">
             <span className="measure-label">空間距離</span>
-            <span className="measure-value">{totalDist.toFixed(2)} m</span>
+            <span className="measure-value">{Math.round(totalDist * 1000)} mm</span>
           </div>
         </div>
       )}
