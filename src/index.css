@@ -28,6 +28,7 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh; /* iOS: アドレスバー/ナビバーを除いた実際の高さ */
 }
 
 .app-header {
@@ -266,7 +267,7 @@ html, body, #root {
   background: rgba(30, 30, 50, 0.85);
   border: 1px solid var(--panel-border);
   border-radius: 5px;
-  color: var(--text-color);
+  color: var(--text);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1200,3 +1201,140 @@ html, body, #root {
 .panel-content::-webkit-scrollbar { width: 4px; }
 .panel-content::-webkit-scrollbar-track { background: transparent; }
 .panel-content::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 4px; }
+
+/* ===== モバイル対応 ===== */
+
+/*
+ * タブレット縦 / 大きめスマホ (641px〜1023px)
+ * パネル幅を少し狭める
+ */
+@media (max-width: 1023px) {
+  .left-panel { width: 260px; }
+}
+
+/*
+ * スマホ縦 (〜640px)
+ * 上下スタック: パネルが上 / 3Dビューが下
+ */
+@media (max-width: 640px) {
+  /* ヘッダーをコンパクトに */
+  .app-header {
+    padding: 6px 10px;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .app-header h1 { font-size: 1rem; }
+  .subtitle { display: none; }
+  .undo-redo-btns { gap: 4px; }
+  .undo-btn { padding: 4px 8px; font-size: 0.75rem; }
+
+  /* 縦並びに切り替え */
+  .app-body { flex-direction: column; }
+
+  /* 左パネル: 全幅・高さ上限・パネル全体をスクロール可能に */
+  .left-panel {
+    width: 100%;
+    max-height: 48dvh;
+    border-right: none;
+    border-bottom: 1px solid var(--panel-border);
+    overflow-y: auto;         /* パネル全体をスクロール */
+    flex-direction: column;
+  }
+
+  /* panel-content: スクロールをパネル親に委ねる */
+  .panel-content {
+    flex: none;
+    overflow-y: visible;
+    padding: 8px 10px;
+  }
+
+  /* ExportImport: パネルのスクロール内に収める */
+  .export-import-wrap {
+    /* flex-shrinkを解除しスクロール内に納める */
+    flex-shrink: 1;
+  }
+
+  /* ExportImportボタンを2列折り返しに */
+  .export-import {
+    flex-wrap: wrap;
+    padding: 5px 10px;
+    gap: 5px;
+  }
+  .ei-btn {
+    flex: 1 1 42%;
+    font-size: 0.78rem;
+    padding: 7px 4px;
+  }
+  .ei-btn.template {
+    flex: 0 0 auto;
+    padding: 7px 8px;
+  }
+
+  /* 3Dビュー: 残りの高さを使う */
+  .view-3d {
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* 3Dビュー内のヒントテキストは小さく */
+  .scene-help {
+    font-size: 0.68rem;
+    padding: 4px 10px;
+  }
+
+  /* InspectorPanelをタッチしやすいよう左配置・幅広め */
+  .inspector-panel {
+    right: 4px;
+    left: 4px;
+    width: auto;
+    top: 50px;
+  }
+
+  /* 計測パネル */
+  .measure-panel {
+    min-width: 0;
+    width: calc(100% - 32px);
+    max-width: 320px;
+  }
+
+  /* 計測ボタン */
+  .measure-btn {
+    top: 8px;
+    right: 8px;
+    font-size: 0.75rem;
+    padding: 5px 10px;
+  }
+}
+
+/*
+ * スマホ横 (高さ〜500px, 幅〜900px)
+ * 横並びを維持するが狭いパネル + スクロール可能に
+ */
+@media (max-height: 500px) and (orientation: landscape) {
+  .app-header {
+    padding: 4px 12px;
+  }
+  .app-header h1 { font-size: 0.95rem; }
+  .subtitle { display: none; }
+
+  .left-panel {
+    width: 220px;
+    overflow-y: auto;
+  }
+
+  /* panel-content を縮めてExportImportを見せる */
+  .panel-content {
+    max-height: calc(100dvh - 80px);
+  }
+}
+
+/* iOS セーフエリア対応（ノッチ・ホームバー） */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .export-import-wrap {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .app-header {
+    padding-left: max(10px, env(safe-area-inset-left, 0px));
+    padding-right: max(10px, env(safe-area-inset-right, 0px));
+  }
+}
